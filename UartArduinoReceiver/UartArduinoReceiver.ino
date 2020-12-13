@@ -1,4 +1,4 @@
-#define NUM_LEDS 173  
+#define NUM_LEDS 113  
 #define DI_PIN 2
 #define OFF_TIME 10
 #define CURRENT_LIMIT 2000 
