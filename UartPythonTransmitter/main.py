@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-import sys
 import os
 import select
+import sys
 import threading
+import time
 
-import matplotlib.pyplot as plt
 import numpy as np
 import serial
+import cv2
+from mss import mss
 
-device_name = "/dev/ttyUSB0"
-source_img_w = 4
-source_img_h = 3
+device_name = "/dev/whatever"
+source_img_w = 0
+source_img_h = 0
 
 target_img = np.zeros((source_img_h, source_img_w, 3), dtype=np.uint8)
 
 fifo_path = "/tmp/screencapture.fifo"
 
-delay_between_frames = 0.5
+
+def current_milli_time():
+    return int(round(time.time() * 1000))
 
 
 def parse_img(data):
@@ -26,22 +30,6 @@ def parse_img(data):
         image = image.reshape((source_img_h, source_img_w, 3))
         # print("img parsed")
         target_img = image
-        target_img[0][0][0] = 255
-        target_img[0][0][1] = 0
-        target_img[0][0][2] = 0
-
-        target_img[source_img_h - 1][0][0] = 0
-        target_img[source_img_h - 1][0][1] = 255
-        target_img[source_img_h - 1][0][2] = 0
-
-        target_img[0][source_img_w - 1][0] = 0
-        target_img[0][source_img_w - 1][1] = 0
-        target_img[0][source_img_w - 1][2] = 255
-
-        target_img[source_img_h - 1][source_img_w - 1][0] = 255
-        target_img[source_img_h - 1][source_img_w - 1][1] = 255
-        target_img[source_img_h - 1][source_img_w - 1][2] = 255
-
     except Exception:
         print("error in parse_img")
 
@@ -85,7 +73,7 @@ def send_preambula(ser):
 
 
 def send_uart():
-    ser = serial.Serial(device_name, 115200)  # open serial port
+    ser = serial.Serial(device_name, 691200)  # open serial port
     import time
     time.sleep(5)
     print("serial ready")
@@ -100,18 +88,6 @@ def send_uart():
 
         for h in range(1, source_img_h):
             send_pixel(ser, target_img[h][source_img_w - 1])
-
-        # data = bytearray(3)
-        # data[0] = 0
-        # data[1] = 0
-        # data[2] = 0
-        #
-        # for i in range(0, 8):
-        #     send_pixel(ser, data)
-        #     data[1] = (i + 1) * 30
-        #     data[2] = (8 - i) * 30
-
-        time.sleep(delay_between_frames)
 
     ser.close()  # close port
 
@@ -128,17 +104,7 @@ def read_exactly(fd, size):
     return data
 
 
-def show_img():
-    while True:
-        # print("drawn")
-        fg = plt.figure()
-        ax = fg.gca()
-        form = ax.imshow(target_img)
-        plt.show()
-        plt.pause(delay_between_frames)
-
-
-def upd_source_img():
+def upd_source_img_from_ffmpeg():
     print("fifo read started")
     with open(fifo_path, "rb") as fifo:
         while True:
@@ -149,13 +115,38 @@ def upd_source_img():
 
 
 def dump_with_ffmpeg():
-    print("dump started")
-    import time
+    print("ffmpeg dump started")
+    fps = 0
+    fps_last_dump = current_milli_time()
     while True:
         os.system(
             "ffmpeg -y -loglevel error -f x11grab -s 1920x1080 -i :0.0 -s " + str(source_img_w) + "x" + str(
                 source_img_h) + " -vframes 1 -f rawvideo -threads 2 -pix_fmt rgb24 - > " + fifo_path)
-        time.sleep(delay_between_frames)
+        fps += 1
+        if (current_milli_time() - fps_last_dump) > 1000:
+            fps_last_dump = current_milli_time()
+            print("dump fps: " + str(fps))
+            fps = 0
+        time.sleep(0.001)
+
+
+def dump_with_mss():
+    global target_img
+    print("mss dump started")
+    fps = 0
+    fps_last_dump = current_milli_time()
+    sct = mss()
+    bounding_box = {'top': 0, 'left': 0, 'width': 1920, 'height': 1080}
+    while True:
+        sct_img = sct.grab(bounding_box)
+        sct_img = cv2.resize(np.array(sct_img), dsize=(source_img_w, source_img_h), interpolation=cv2.INTER_CUBIC)
+        target_img = np.array(sct_img)
+        fps += 1
+        if (current_milli_time() - fps_last_dump) > 1000:
+            fps_last_dump = current_milli_time()
+            print("dump fps: " + str(fps))
+            fps = 0
+        time.sleep(0.005)
 
 
 if __name__ == '__main__':
@@ -165,26 +156,28 @@ if __name__ == '__main__':
     device_name = sys.argv[1]
     source_img_w = int(sys.argv[2])
     source_img_h = int(sys.argv[3])
+    np.zeros((source_img_h, source_img_w, 3), dtype=np.uint8)
 
     print("using port " + device_name + " image size " + str(source_img_w) + "x" + str(source_img_h))
 
     os.system("rm -rf " + fifo_path)
     os.system("mkfifo " + fifo_path)
 
-    dump_thread = threading.Thread(target=dump_with_ffmpeg)
+    dump_thread = threading.Thread(target=dump_with_mss())
     dump_thread.daemon = True
     dump_thread.start()
 
-    parse_thread = threading.Thread(target=upd_source_img)
-    parse_thread.daemon = True
-    parse_thread.start()
+    # dump_thread = threading.Thread(target=dump_with_ffmpeg)
+    # dump_thread.daemon = True
+    # dump_thread.start()
 
-    send_thread = threading.Thread(target=send_uart)
-    send_thread.daemon = True
-    send_thread.start()
+    # parse_thread = threading.Thread(target=upd_source_img_from_ffmpeg)
+    # parse_thread.daemon = True
+    # parse_thread.start()
 
-    while True:
-        import time
+    # send_thread = threading.Thread(target=send_uart)
+    # send_thread.daemon = True
+    # send_thread.start()
 
-        time.sleep(1)
-        show_img()
+    print("input something to stop my sufferings")
+    x = input()
