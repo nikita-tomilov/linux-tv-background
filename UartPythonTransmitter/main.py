@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import os
-import select
 import sys
 import threading
 import time
@@ -9,29 +7,40 @@ import numpy as np
 import serial
 import cv2
 from mss import mss
+from flask import Flask, redirect, send_from_directory
+from flask import render_template
+
+app = Flask(__name__, template_folder="./template/")
 
 device_name = "/dev/whatever"
+
 source_img_w = 0
 source_img_h = 0
-
 target_img = np.zeros((source_img_h, source_img_w, 3), dtype=np.uint8)
+total_pixels = 0
 
-fifo_path = "/tmp/screencapture.fifo"
+current_mode = 1
+
+MODE_OFF = 0
+MODE_AMBILIGHT = 1
+MODE_CHRISTMAS = 2
+MODE_SOLID_COLOUR = 3
 
 
-def current_milli_time():
+mode_christmas_last_update = 0
+mode_christmas_counter = 1
+
+mode_solid_colour_r = 0
+mode_solid_colour_g = 255
+mode_solid_colour_b = 255
+
+
+def time_millis():
     return int(round(time.time() * 1000))
 
 
-def parse_img(data):
-    try:
-        global target_img
-        image = np.fromstring(data, dtype='uint8')
-        image = image.reshape((source_img_h, source_img_w, 3))
-        # print("img parsed")
-        target_img = image
-    except Exception:
-        print("error in parse_img")
+def time_micros():
+    return time.time()
 
 
 def avg_pixel(fromx, fromy, tox, toy):
@@ -73,80 +82,112 @@ def send_preambula(ser):
 
 
 def send_uart():
-    ser = serial.Serial(device_name, 691200)  # open serial port
-    import time
+    ser = serial.Serial(device_name, 691200)
     time.sleep(5)
     print("serial ready")
+    tmp_pixel = bytearray(3)
+    global mode_christmas_last_update, mode_christmas_counter
+    global mode_solid_colour_r, mode_solid_colour_g, mode_solid_colour_b
     while True:
         send_preambula(ser)
 
-        for h in range(source_img_h - 1, 0, -1):
-            send_pixel(ser, target_img[h][0])
+        if current_mode == MODE_OFF:
+            tmp_pixel[0] = 0
+            tmp_pixel[1] = 0
+            tmp_pixel[2] = 0
+            for x in range(0, total_pixels):
+                send_pixel(ser, tmp_pixel)
 
-        for w in range(0, source_img_w):
-            send_pixel(ser, target_img[0][w])
+        if current_mode == MODE_SOLID_COLOUR:
+            tmp_pixel[0] = mode_solid_colour_r
+            tmp_pixel[1] = mode_solid_colour_g
+            tmp_pixel[2] = mode_solid_colour_b
+            for x in range(0, total_pixels):
+                send_pixel(ser, tmp_pixel)
 
-        for h in range(1, source_img_h):
-            send_pixel(ser, target_img[h][source_img_w - 1])
+        if current_mode == MODE_AMBILIGHT:
+            for h in range(source_img_h - 1, 0, -1):
+                send_pixel(ser, target_img[h][0])
+
+            for w in range(0, source_img_w):
+                send_pixel(ser, target_img[0][w])
+
+            for h in range(1, source_img_h):
+                send_pixel(ser, target_img[h][source_img_w - 1])
+
+        if current_mode == MODE_CHRISTMAS:
+            for x in range(0, total_pixels):
+                if (x % 2) == (mode_christmas_counter % 2):
+                    tmp_pixel[0] = 255
+                    tmp_pixel[1] = 0
+                    tmp_pixel[2] = 0
+                else:
+                    tmp_pixel[0] = 0
+                    tmp_pixel[1] = 255
+                    tmp_pixel[2] = 0
+                send_pixel(ser, tmp_pixel)
+            if (time_millis() - mode_christmas_last_update) > 1000:
+                mode_christmas_last_update = time_millis()
+                mode_christmas_counter += 1
+
+        time.sleep(0.033)
 
     ser.close()  # close port
-
-
-def read_exactly(fd, size):
-    data = bytearray(0)
-    remaining = size
-    while remaining > 0:  # or simply "while remaining", if you'd like
-        newdata = fd.read(remaining)
-        if len(newdata) != 0:
-            data.extend(newdata)
-            remaining -= len(newdata)
-
-    return data
-
-
-def upd_source_img_from_ffmpeg():
-    print("fifo read started")
-    with open(fifo_path, "rb") as fifo:
-        while True:
-            select.select([fifo], [], [fifo])
-            data = read_exactly(fifo, source_img_h * source_img_w * 3)
-            if len(data) > 0:
-                parse_img(bytes(data))
-
-
-def dump_with_ffmpeg():
-    print("ffmpeg dump started")
-    fps = 0
-    fps_last_dump = current_milli_time()
-    while True:
-        os.system(
-            "ffmpeg -y -loglevel error -f x11grab -s 1920x1080 -i :0.0 -s " + str(source_img_w) + "x" + str(
-                source_img_h) + " -vframes 1 -f rawvideo -threads 2 -pix_fmt rgb24 - > " + fifo_path)
-        fps += 1
-        if (current_milli_time() - fps_last_dump) > 1000:
-            fps_last_dump = current_milli_time()
-            print("dump fps: " + str(fps))
-            fps = 0
-        time.sleep(0.001)
 
 
 def dump_with_mss():
     global target_img
     print("mss dump started")
     fps = 0
-    fps_last_dump = current_milli_time()
+    fps_last_dump = time_millis()
     sct = mss()
     bounding_box = {'top': 0, 'left': 0, 'width': 1920, 'height': 1080}
     while True:
+        if current_mode != MODE_AMBILIGHT:
+            time.sleep(1)
+            continue
+        start_time = time_micros()
         sct_img = sct.grab(bounding_box)
         sct_img = cv2.resize(np.array(sct_img), dsize=(source_img_w, source_img_h), interpolation=cv2.INTER_CUBIC)
         target_img = np.array(sct_img)
+        dump_time = time_micros() - start_time
+        # print(dump_time)
+        ts = 0.029 - dump_time
+        if ts > 0:
+            time.sleep(ts)
         fps += 1
-        if (current_milli_time() - fps_last_dump) > 1000:
-            fps_last_dump = current_milli_time()
-            print("dump fps: " + str(fps))
+        if (time_millis() - fps_last_dump) > 1000:
+            fps_last_dump = time_millis()
+            # print("dump fps: " + str(fps))
             fps = 0
-        time.sleep(0.005)
+
+
+@app.route('/')
+def http_main_entry():
+    return render_template('index.html', mode=current_mode)
+
+
+@app.route('/mode/<mode>')
+def change_mode(mode):
+    global current_mode
+    current_mode = int(mode)
+    print("changed mode to " + str(mode))
+    return redirect("/", code=302)
+
+
+@app.route('/colour/<r>/<g>/<b>')
+def change_colour(r, g, b):
+    global mode_solid_colour_r, mode_solid_colour_g, mode_solid_colour_b
+    mode_solid_colour_r = int(r)
+    mode_solid_colour_g = int(g)
+    mode_solid_colour_b = int(b)
+    print("changed colour to " + r + "," + g + "," + b)
+    return redirect("/", code=302)
+
+
+@app.route('/js/<path:path>')
+def send_js(path):
+    return send_from_directory('template', path)
 
 
 if __name__ == '__main__':
@@ -157,27 +198,16 @@ if __name__ == '__main__':
     source_img_w = int(sys.argv[2])
     source_img_h = int(sys.argv[3])
     np.zeros((source_img_h, source_img_w, 3), dtype=np.uint8)
+    total_pixels = source_img_h * 2 + source_img_w
 
     print("using port " + device_name + " image size " + str(source_img_w) + "x" + str(source_img_h))
 
-    os.system("rm -rf " + fifo_path)
-    os.system("mkfifo " + fifo_path)
-
-    dump_thread = threading.Thread(target=dump_with_mss())
+    dump_thread = threading.Thread(target=dump_with_mss)
     dump_thread.daemon = True
     dump_thread.start()
-
-    # dump_thread = threading.Thread(target=dump_with_ffmpeg)
-    # dump_thread.daemon = True
-    # dump_thread.start()
-
-    # parse_thread = threading.Thread(target=upd_source_img_from_ffmpeg)
-    # parse_thread.daemon = True
-    # parse_thread.start()
 
     # send_thread = threading.Thread(target=send_uart)
     # send_thread.daemon = True
     # send_thread.start()
 
-    print("input something to stop my sufferings")
-    x = input()
+    app.run(host='0.0.0.0', port=8138, threaded=True)

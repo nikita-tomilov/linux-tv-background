@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf8">
+        <title>TV Backlight Server}</title>
+        <script src="/js/jscolor.js"></script>
+        <script src="/js/script.js"></script>
+    </head>
+    <body>
+        <p>Current mode = {{ mode }}</p>
+        <p><a href="/mode/0">Turn Off</a></p>
+        <p><a href="/mode/1">Turn Ambilight on</a></p>
+        <p><a href="/mode/2">Turn Christmas on</a></p>
+        <p><a href="/mode/3">Turn Solid Colour on</a></p>
+        <input class="jscolor {onFineChange:'updateRect(this)'}" onchange="updateRGB(this.jscolor)" value="000000">
+		<p id="rect" style="border:1px solid gray; width:161px; height:100px;">
+        </p>
+    </body>
+</html>
