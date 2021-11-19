@@ -62,9 +62,9 @@ def avg_pixel(fromx, fromy, tox, toy):
 
 def send_pixel(ser, pixel):
     data = bytearray(3)
-    data[0] = pixel[0]
+    data[0] = pixel[2]
     data[1] = pixel[1]
-    data[2] = pixel[2]
+    data[2] = pixel[0]
     ser.write(data)
     ser.flush()
 
