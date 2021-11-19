@@ -135,31 +135,32 @@ def send_uart():
     ser.close()  # close port
 
 
-def dump_with_mss():
+def dump_by_webcam():
     global target_img
-    print("mss dump started")
-    fps = 0
-    fps_last_dump = time_millis()
-    sct = mss()
-    bounding_box = {'top': 0, 'left': 0, 'width': 1920, 'height': 1080}
+    print("webcam dump started")
+    # fps = 0
+    # fps_last_dump = time_millis()
+    webcam = cv2.VideoCapture(0)
     while True:
         if current_mode != MODE_AMBILIGHT:
             time.sleep(1)
             continue
-        start_time = time_micros()
-        sct_img = sct.grab(bounding_box)
-        sct_img = cv2.resize(np.array(sct_img), dsize=(source_img_w, source_img_h), interpolation=cv2.INTER_CUBIC)
+        # start_time = time_micros()
+        check, frame = webcam.read()
+        # print(check)  # prints true as long as the webcam is running
+        # print(frame)  # prints matrix values of each framecd
+        sct_img = cv2.resize(np.array(frame), dsize=(source_img_w, source_img_h), interpolation=cv2.INTER_CUBIC)
         target_img = np.array(sct_img)
-        dump_time = time_micros() - start_time
+        # dump_time = time_micros() - start_time
         # print(dump_time)
-        ts = 0.029 - dump_time
-        if ts > 0:
-            time.sleep(ts)
-        fps += 1
-        if (time_millis() - fps_last_dump) > 1000:
-            fps_last_dump = time_millis()
-            # print("dump fps: " + str(fps))
-            fps = 0
+        # ts = 0.029 - dump_time
+        # if ts > 0:
+        #     time.sleep(ts)
+        # fps += 1
+        # if (time_millis() - fps_last_dump) > 1000:
+        #     fps_last_dump = time_millis()
+        #     print("webcam dump fps: " + str(fps))
+        #     fps = 0
 
 
 @app.route('/')
@@ -202,7 +203,7 @@ if __name__ == '__main__':
 
     print("using port " + device_name + " image size " + str(source_img_w) + "x" + str(source_img_h))
 
-    dump_thread = threading.Thread(target=dump_with_mss)
+    dump_thread = threading.Thread(target=dump_by_webcam)
     dump_thread.daemon = True
     dump_thread.start()
 
