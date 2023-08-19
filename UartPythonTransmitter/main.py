@@ -6,7 +6,6 @@ import time
 import numpy as np
 import serial
 import cv2
-from mss import mss
 from flask import Flask, redirect, send_from_directory
 from flask import render_template
 
@@ -44,28 +43,11 @@ def time_micros():
     return time.time()
 
 
-def avg_pixel(fromx, fromy, tox, toy):
-    avgs = [0.0, 0.0, 0.0]
-    pixel = bytearray(3)
-    count = 0
-    for y in range(fromy, toy):
-        for x in range(fromx, tox):
-            for z in range(0, 3):
-                avgs[z] += target_img[y][x][z]
-                target_img[y][x][z] = 128
-                count += 1
-    for z in range(0, 3):
-        avgs[z] = avgs[z] / count
-        pixel[z] = int(avgs[z])
-
-    return pixel
-
-
 def send_pixel(ser, pixel):
     data = bytearray(3)
-    data[0] = pixel[0]
+    data[0] = pixel[2] # pixels are in GBR because OpenCV
     data[1] = pixel[1]
-    data[2] = pixel[2]
+    data[2] = pixel[1]
     ser.write(data)
     ser.flush()
 
