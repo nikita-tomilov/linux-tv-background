@@ -47,7 +47,7 @@ def send_pixel(ser, pixel):
     data = bytearray(3)
     data[0] = pixel[2] # pixels are in GBR because OpenCV
     data[1] = pixel[1]
-    data[2] = pixel[1]
+    data[2] = pixel[0]
     ser.write(data)
     ser.flush()
 
@@ -195,7 +195,7 @@ if __name__ == '__main__':
     np.zeros((source_img_h, source_img_w, 3), dtype=np.uint8)
     total_pixels = source_img_h * 2 + source_img_w
 
-    print("using port " + uart_device_name + " image size " + str(source_img_w) + "x" + str(source_img_h))
+    print("using port " + uart_device_name + " cap dev " + str(cap_dev_idx) + " image size " + str(source_img_w) + "x" + str(source_img_h))
 
     dump_thread = threading.Thread(target=dump_with_cv2)
     dump_thread.daemon = True
