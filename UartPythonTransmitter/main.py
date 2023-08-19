@@ -12,7 +12,8 @@ from flask import render_template
 
 app = Flask(__name__, template_folder="./template/")
 
-device_name = "/dev/whatever"
+uart_device_name = "/dev/whatever"
+cap_dev_idx = 2
 
 source_img_w = 0
 source_img_h = 0
@@ -82,7 +83,7 @@ def send_preambula(ser):
 
 
 def send_uart():
-    ser = serial.Serial(device_name, 691200)
+    ser = serial.Serial(uart_device_name, 691200)
     time.sleep(5)
     print("serial ready")
     tmp_pixel = bytearray(3)
@@ -135,21 +136,29 @@ def send_uart():
     ser.close()  # close port
 
 
-def dump_with_mss():
+def dump_with_cv2():
     global target_img
-    print("mss dump started")
+    print("cv2 dump started")
     fps = 0
     fps_last_dump = time_millis()
-    sct = mss()
-    bounding_box = {'top': 0, 'left': 0, 'width': 1920, 'height': 1080}
+    cap = cv2.VideoCapture(cap_dev_idx)
+    if not cap.isOpened():
+        print("Cannot open camera with idx" + str(cap_dev_idx))
+        exit()
     while True:
         if current_mode != MODE_AMBILIGHT:
             time.sleep(1)
             continue
         start_time = time_micros()
-        sct_img = sct.grab(bounding_box)
-        sct_img = cv2.resize(np.array(sct_img), dsize=(source_img_w, source_img_h), interpolation=cv2.INTER_CUBIC)
+
+        ret, frame = cap.read()
+        if not ret:
+            print("Can't receive frame (stream end?). Exiting ...")
+            break
+
+        sct_img = cv2.resize(frame, dsize=(source_img_w, source_img_h), interpolation=cv2.INTER_CUBIC)
         target_img = np.array(sct_img)
+
         dump_time = time_micros() - start_time
         # print(dump_time)
         ts = 0.029 - dump_time
@@ -160,6 +169,9 @@ def dump_with_mss():
             fps_last_dump = time_millis()
             # print("dump fps: " + str(fps))
             fps = 0
+        # cv2.imshow('frame', sct_img)
+        # if cv2.waitKey(1) == ord('q'):
+        #     break
 
 
 @app.route('/')
@@ -191,18 +203,19 @@ def send_js(path):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 4:
-        print("usage: " + sys.argv[0] + " <serial device name> <led strip pixels width> <led strip pixels height>")
+    if len(sys.argv) != 5:
+        print("usage: " + sys.argv[0] + " <serial device name> <capture device index> <led strip pixels width> <led strip pixels height>")
         exit(-1)
-    device_name = sys.argv[1]
-    source_img_w = int(sys.argv[2])
-    source_img_h = int(sys.argv[3])
+    uart_device_name = sys.argv[1]
+    cap_dev_idx = int(sys.argv[2])
+    source_img_w = int(sys.argv[3])
+    source_img_h = int(sys.argv[4])
     np.zeros((source_img_h, source_img_w, 3), dtype=np.uint8)
     total_pixels = source_img_h * 2 + source_img_w
 
-    print("using port " + device_name + " image size " + str(source_img_w) + "x" + str(source_img_h))
+    print("using port " + uart_device_name + " image size " + str(source_img_w) + "x" + str(source_img_h))
 
-    dump_thread = threading.Thread(target=dump_with_mss)
+    dump_thread = threading.Thread(target=dump_with_cv2)
     dump_thread.daemon = True
     dump_thread.start()
 
